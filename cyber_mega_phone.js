@@ -13,6 +13,13 @@
 
 let isFirefox = typeof InstallTrigger !== 'undefined';
 let isChrome = !!window.chrome && !!window.chrome;
+var audioContext;
+var audioContext2;
+var analyser;
+var oscillators;
+var buffer;
+
+//audioContext = new OfflineAudioContext({numberOfChannels: 1,length: 1000*8000, sampleRate: 8000});
 
 function CyberMegaPhone(id, name, password, host, register, audio=true, video=true) {
 	EasyEvent.call(this);
@@ -103,6 +110,7 @@ CyberMegaPhone.prototype.connect = function () {
 		rtc.on("confirmed", function () {
 			// ACK was received
 			let streams = rtc.connection.getLocalStreams();
+			//let streams = audioContext.createMediaStreamDestination();
 			for (let i = 0; i < streams.length; ++i) {
 				console.log('confirmed: adding local stream ' + streams[i].id);
 				streams[i].local = true;
@@ -180,14 +188,59 @@ CyberMegaPhone.prototype.call = function (exten) {
 		return;
 	}
 
+if('webkitAudioContext' in window) {
+   audioContext = new webkitAudioContext();
+   audioContext2 = new webkitAudioContext();
+} else {
+  audioContext = new AudioContext();
+  audioContext2 = new AudioContext();
+}
+
+// create audio nodes
+analyser = audioContext2.createAnalyser();
+analyser.fftSize = 512;
+analyser.smoothingTimeConstant = 0.0;
+analyser.minDecibels = -58;
+
+buffer = new Uint8Array(analyser.frequencyBinCount);
+
+let myStream = audioContext.createMediaStreamDestination();
+// for making modem tones
+      oscillators = (function initialize() {
+        const frequencies = [392, 784, 1046.5, 1318.5, 1568, 1864.7, 2093, 2637];
+
+        // create audio nodes
+        let masterGain = audioContext.createGain();
+        masterGain.gain.value = 1.0/frequencies.length;
+        let sinusoids = frequencies.map(f => {
+          let oscillator = audioContext.createOscillator();
+          oscillator.type = 'sine';
+          oscillator.frequency.value = f;
+          oscillator.start();
+          return oscillator;
+        });
+        let oscillators = frequencies.map(f => {
+          let volume = audioContext.createGain();
+          volume.gain.value = 0;
+          return volume;
+        });
+
+        // connect nodes
+        sinusoids.forEach((sine, i) => sine.connect(oscillators[i]));
+        oscillators.forEach((osc) => osc.connect(masterGain));
+	      //masterGain.connect(audioContext.destination);
+	masterGain.connect(myStream);
+        return oscillators;
+      })();
+	console.log(myStream);
 	let options = {
-		'mediaConstraints': { 'audio': this.audio, 'video': this.video }
-	};
+//		'mediaConstraints': { 'audio': this.audio, 'video': this.video },
+	mediaStream: myStream.stream};
 
 	if (exten.startsWith('sip:')) {
-		this._rtc = this._ua.call(exten);
+		this._rtc = this._ua.call(exten, options);
 	} else {
-		this._rtc = this._ua.call('sip:' + exten + '@' + this.host, options);
+		this._rtc = this._ua.call('sip:' + exten + '@' + this.host, options );
 	}
 };
 
@@ -246,6 +299,12 @@ Streams.prototype.add = function (stream) {
 		this._streams.push(stream);
 		console.log('Streams: added ' + stream.id);
 		this.raise('streamAdded', stream);
+		console.log("***************Connecting to analyser: ");
+		console.log(stream);
+		if (!stream.local) {
+			var microphone = audioContext2.createMediaStreamSource(stream);
+			microphone.connect(analyser);
+		}
 	}
 };
 

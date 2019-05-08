@@ -21,9 +21,9 @@
 let phone;
 
 window.onload = function() {
-	document.getElementById("accountId").placeholder = "video";
-	document.getElementById("accountName").value = "";
-	document.getElementById("accountPassword").placeholder = "video";
+	document.getElementById("accountId").placeholder = "webrtc_client";
+	document.getElementById("accountName").value = "webrtc_client";
+	document.getElementById("accountPassword").placeholder = "webrtc_client";
 	document.getElementById("accountHost").placeholder = "localhost";
 	document.getElementById("accountRegister").checked = true;
 	document.getElementById("extension").placeholder = "video-conference";
@@ -290,6 +290,155 @@ window.onunload = function() {
 			<input type="button" id="connect" class="connect" value="Connect" />
 			<input type="button" id="call" class="call" value="Call" />
 		</div>
+
+
+
+    <p>
+    <div>send</div>
+    <textarea></textarea>
+      <button data-action="encode">send</button>
+    </p>
+    <p>
+    	<div>receive</div>
+    	<textarea readonly></textarea>
+      <button data-action="clear">clear</button>
+    </p>
+
+    <input id="bin-value-threshold" type="hidden" value="124">
+
+    <input id="duplicate-state-threshold" type="hidden" value="10">
+
+    <input id="active-duration" type="hidden" value="100" min="10", max="1000", step="10">
+
+    <input id="pause-duration" type="hidden" value="20" min="0", max="500", step="10">
+
+    <script>
+
+      const char2oscillators = (char) => {
+        return oscillators.filter((_, i) => {
+          let charCode = char.charCodeAt(0);
+          return charCode & (1 << i);
+        });
+      };
+
+      const _mute = () => {
+        oscillators.forEach(osc => {
+          osc.gain.value = 0
+        });
+      }
+
+      const encodeChar = (char, duration) => {
+        let activeOscillators = char2oscillators(char);
+        activeOscillators.forEach(osc => {
+          osc.gain.value = 1;
+        });
+        window.setTimeout(_mute, duration);
+      }
+
+
+      const encode = (text, onComplete) => {
+        const pause = +document.querySelector('#pause-duration').value;
+        const duration = +document.querySelector('#active-duration').value;
+        const timeBetweenChars = pause + duration;
+
+        text.split('').forEach((char, i) => {
+          window.setTimeout(() => {
+            encodeChar(char, duration);
+          }, i * timeBetweenChars);
+        });
+        window.setTimeout(onComplete, text.length * timeBetweenChars);
+      };
+
+      let button = document.querySelector('button[data-action="encode"]');
+      button.addEventListener('click', () => {
+        button.setAttribute('disabled', 'disabled');
+	var msg =document.querySelector('textarea').value;
+	msg = msg + '\n';
+        document.querySelector('textarea').value = '';
+        encode(msg, () => {
+          button.removeAttribute('disabled');
+        });
+      });
+
+      document.querySelector('button[data-action="clear"]').addEventListener('click', (e) => {
+        document.querySelector('textarea[readonly]').innerHTML = '';
+
+        e.target.blur();
+      });
+
+    </script>
+
+	<script>
+      const frequencies = [392, 784, 1046.5, 1318.5, 1568, 1864.7, 2093, 2637];
+
+      // helper functions
+      const frequencyBinValue = (f) => {
+        const hzPerBin = (audioContext2.sampleRate) / (2*analyser.frequencyBinCount);
+        const index = parseInt((f + hzPerBin/2) / hzPerBin);
+        return buffer[index];
+      };
+      const isActive = (value) => {
+        let threshold = +document.querySelector('#bin-value-threshold').value;
+        return value > threshold;
+      };
+
+      const getState = () => {
+        return frequencies
+          .map(frequencyBinValue)
+          .reduce((acc, val, idx) => {
+            if (isActive(val)) {
+              acc += (1 << idx);
+            }
+            return acc;
+          }, 0);
+      }
+
+      const output = (state) => {
+        let textarea = document.querySelector('textarea[readonly]');
+        textarea.innerHTML += String.fromCharCode(state % 256);
+	textarea.scrollTop = textarea.scrollHeight;
+      }
+
+      const trace = (state) => {
+        let str = state.toString(2);
+        let pad = "0b00000000"
+        let text = pad.substring(0, pad.length - str.length) + str
+        console.log("************************" + text);
+      }
+
+      const decode = () => {
+        let prevState = 0;
+        let duplicates = 0;
+
+        const iteration = () => {
+		if (!analyser){ 
+          window.setTimeout(iteration, 1);
+			return; }
+          		analyser.getByteFrequencyData(buffer);
+          let state = getState();
+          let duplicateThreshold = +document.querySelector('#duplicate-state-threshold').value;
+          if (state === prevState) {
+            duplicates++;
+          }
+          else {
+            trace(state);
+            prevState = state;
+            duplicates = 0;
+          }
+
+          if (duplicates === duplicateThreshold) {
+            output(state);
+          }
+          window.setTimeout(iteration, 1);
+        };
+        iteration();
+      };
+      decode();
+
+	</script>
+
+
+
 		<div id="account-modal" class="account-modal">
 			<div class="account-content">
 				<span class="account-close" onclick="accountClose()">&times;</span>
